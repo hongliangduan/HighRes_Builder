@@ -10,8 +10,6 @@ HighRes_Builder is a small toolkit that **builds AlphaFold3-compatible inputs** 
 
 ---
 
-
-
 ## Quick start
 
 ```bash
@@ -224,11 +222,6 @@ Copy these files into the corresponding locations of your local AlphaFold3 check
 ---
 
 ## Reproducibility and limitations
-
-### Note for manuscript responses
-
-> Thank you for this comment. We agree that our previous wording (“not robustly handled by RDKit-based conformer generation”) was too qualitative and that the scope of “residue-like” must be defined explicitly. In the revised manuscript, we therefore (i) provide an operational definition of “residue-like,” (ii) state the scope boundaries clearly, and (iii) quantify the fraction excluded using our auditable screening output. For detailed descriptions, see: https://github.com/hongliangduan/HighRes_Builder
-
 
 - **Determinism:** Step 2 uses a fixed RDKit embedding seed by default.
 - **Chirality note:** HighRes_Builder preserves stereochemistry as encoded in the input where available, but final stereochemical correctness in predicted complexes can still depend on the downstream predictor. We recommend post-hoc stereochemical validation for chirality-critical applications.
