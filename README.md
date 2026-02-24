@@ -10,6 +10,13 @@ HighRes_Builder is a small toolkit that **builds AlphaFold3-compatible inputs** 
 
 ---
 
+## Manuscript / reviewer note (dataset scope & reproducibility)
+
+> Response: Thank you for this comment. We agree that our previous wording (“not robustly handled by RDKit-based conformer generation”) was too qualitative and that the scope of “residue-like” must be defined explicitly. In the revised manuscript, we therefore (i) provide an operational definition of “residue-like,” (ii) state the scope boundaries clearly, and (iii) quantify the fraction excluded using our auditable screening output. For detailed descriptions, please see the README file at https://github.com/hongliangduan/HighRes_Builder
+
+---
+
+
 ## Quick start
 
 ```bash
