@@ -285,7 +285,7 @@ def _process_chunk(lines, idx_id, idx_sm,
 def main():
     global VERBOSE
     ap=argparse.ArgumentParser(description="Audit + filter alpha/beta/gamma amino-acid monomers from ChEMBL chemreps, map to CCD (parallel).")
-    ap.add_argument("--chemreps", required=True, help="chembl_XX_chemreps.txt.gz")
+    ap.add_argument("--chemreps", required=True, help="chembl_36_chemreps.txt.gz")
     ap.add_argument("--ccd", required=True, help="components-pub.sdf.gz")
     ap.add_argument("--out", default="AA_monomers_audited.xlsx")
     # behavior controls
@@ -474,4 +474,5 @@ def main():
     print(f"OK -> {out.resolve()}", flush=True)
 
 if __name__ == "__main__":
+
     main()
