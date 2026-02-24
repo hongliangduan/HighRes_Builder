@@ -1,60 +1,121 @@
 # HighRes_Builder
-get clone https://github.com/AlphaFold-Lab/HighRes_Builder.git
-Than move follow files into the corresponding directory of local alphafold3 repo.
-./src/alphafold3/common/folding_input.py  ./src/alphafold3/constants/chemical_components.py ./src/alphafold3/constants/residue_names.py
-A small toolkit to build **high-quality monomer inputs** for **AlphaFold3** and **PDB CCD (Chemical Component Dictionary)** workflows.
 
-This repository covers a practical pipeline:
+HighRes_Builder is a small toolkit that **builds AlphaFold3-compatible inputs** for **noncanonical / CCD-absent residue-like molecules** by generating:
 
-1. **AA_Monomeric**: screen *amino-acid-like monomers* from **ChEMBL chemreps** (SMILES), audit/filter them, and cross-reference them against **PDB CCD**.
-2. **Smile_to_SDF**: for screened monomers **without a CCD entry**, generate a reasonable **3D conformer** (SDF) using **RDKit**.
-3. **conformation_to_ccd**: convert the **SDF conformer** into a **CCD-style component description** (mmCIF-like fields exported as CSV), for downstream structure prediction.
+- **CCD-compatible residue topology** (atoms + bonds) and **residue-style atom naming**
+- A reasonable set of **“ideal” Cartesian coordinates** (from RDKit conformer generation)
+- **CSV outputs** that can be loaded as custom chemical components in a local AlphaFold3 setup
+
+> **Important clarification (method scope):** HighRes_Builder **does not transplant Cartesian coordinates from CCD templates into the generated residue**. CCD is used for **identity/matching** and **conventions** (topology/atom naming); coordinates for generated residue definitions come from this pipeline (RDKit conformer generation and optional refinement).
+
+---
+
+## Quick start
+
+```bash
+# 0) Clone
+git clone https://github.com/hongliangduan/HighRes_Builder.git
+cd HighRes_Builder
+
+# 1) Create env
+conda create -n highres_builder python=3.11 -y
+conda activate highres_builder
+conda install -c conda-forge rdkit pandas openpyxl -y
+
+# 2) Run screening + CCD mapping (ChEMBL 36)
+cd AA_Monomeric
+python aa_from_chemreps_audit_strict.py --help
+```
 
 ---
 
 ## Repository layout
 
-```
+```text
 HighRes_Builder/
 ├─ AA_Monomeric/
-│  ├─ aa_from_chemreps_audit_strict.py
-│  └─ AA_monomers_audited.xlsx               # example output
+│  ├─ aa_from_chemreps_audit_strict.py     # ChEMBL screening + CCD mapping (audited Excel output)
+│  └─ AA_monomers_audited.xlsx             # example output
 ├─ Smile_to_SDF/
-│  └─ excel_smiles_to_individual_sdf_3d.py
+│  └─ excel_smiles_to_individual_sdf_3d.py # RDKit 3D conformer generation (SDF)
 ├─ conformation_to_ccd/
-│  └─ CCD_generation.py
+│  └─ CCD_generation.py                    # SDF → CCD-like fields (CSV)
 └─ README.md
 ```
 
 ---
 
-## Dependencies
+## What “residue-like” means (chemical scope)
 
-- Python 3.9+ (recommended: 3.10/3.11)
-- RDKit
-- pandas
-- openpyxl (Excel I/O)
+This repo targets **amino-acid-like monomers** that can be embedded into peptides/proteins and represented as AlphaFold3 chemical components.
 
-Example conda environment:
+Operational scope (Step 1):
+
+- **Backbone class:** α / β / γ only (discard δ+)
+- **Required motifs:** a **free amine** (non-amide N with ≥1 H) connected by an aliphatic chain to a **terminal carboxyl group** (–C(=O)O(H/–))
+- **Hard exclusions (by default):**
+  - peptides/oligomers (excess amide bonds)
+  - esters/carbonates (masked acids / prodrug-like forms)
+  - multi-acid species beyond the configured limit
+  - metal/coordination complexes and other chemotypes outside residue-definition scope
+  - overly large/complex molecules (configurable thresholds)
+
+These rules are intentionally strict to keep the dataset in a regime where residue-definition construction and downstream modeling are stable and interpretable. See `AA_Monomeric/aa_from_chemreps_audit_strict.py --help` for all thresholds.
+
+## User guidance: applicability and tuning
+
+HighRes_Builder is intentionally scoped to **peptide-embeddable, amino-acid-like monomers**. If you are unsure whether your chemistry is in scope, use this checklist.
+
+### Intended targets (good fit)
+- **α/β/γ amino acids** with side-chain substitutions (halogenation, methylation, hydroxylation, thioether/selenide, etc.)
+- Common **residue-like modifications** that still form standard peptide bonds (free amine + terminal carboxyl group)
+- Molecules with **explicit stereochemistry** in SMILES when chirality matters (recommended)
+
+### When to expect exclusions
+- **Peptides/oligomers** (multiple amide bonds) — not a single-residue definition
+- **Masked acids** (esters/carbonates) — often prodrug/protected intermediates
+- **Multi-acid** species (> configured carboxyl limit) and highly charged complexes
+- **Metal/coordination** complexes and inorganic/organometallic species
+- **Large / highly complex** scaffolds (high MW, many rings/hetero atoms), which are more likely to fail conformer generation or produce ambiguous residue definitions
+- **Unspecified stereochemistry** in SMILES — RDKit may choose an arbitrary assignment
+
+### How to broaden chemical coverage (tradeoffs)
+You can relax filters in `AA_Monomeric/aa_from_chemreps_audit_strict.py` via flags. Broader coverage typically increases:
+- RDKit embedding/optimization failures,
+- ambiguous “residue-like” matches,
+- and noisy chemotypes that are less meaningful as peptide residues.
+
+Practical approach:
+1) Run with the **default strict** settings.
+2) Inspect `Rejected_with_Reasons` to see dominant exclusion tags (e.g., `MW>`, `RINGS>`, `HETERO>`).
+3) Relax **one threshold at a time**, re-run, and record the exact command/config.
+
+Example: relax size/complexity limits (accept larger chemotypes)
 
 ```bash
-conda create -n highres_builder python=3.11 -y
-conda activate highres_builder
-conda install -c conda-forge rdkit pandas openpyxl -y
+cd AA_Monomeric
+python aa_from_chemreps_audit_strict.py   --chemreps chembl_36_chemreps.txt.gz   --ccd components-pub.sdf.gz   --out AA_monomers_audited_relaxed.xlsx   --max-mw 500 --max-heavy 45 --max-rings 4 --max-hetero 15
 ```
+
+You can also tighten/loosen chemistry constraints:
+- `--max-amide-bonds`, `--max-esters`, `--max-carboxyl`
+- `--no-conn14` (stricter CCD mapping; fewer ambiguous hits)
+- `--keep-all-ccd` (retain all CCD candidates for manual review)
+
+---
 
 ---
 
 ## End-to-end workflow
 
-```
-ChEMBL chemreps (SMILES)
+```text
+ChEMBL chemreps (SMILES; e.g., chembl_36_chemreps.txt.gz)
    │
    ▼
 AA_Monomeric: screening + auditing + CCD mapping
    │  output: AA_monomers_audited.xlsx
    │
-   ├─ has CCD → can use CCD directly
+   ├─ CCD hit → recommend using the official CCD component directly
    └─ no CCD  → proceed
           │
           ▼
@@ -62,131 +123,76 @@ Smile_to_SDF: RDKit 3D conformer generation (SDF)
           │  output: one SDF per CHEMBL_ID
           ▼
 conformation_to_ccd: SDF → CCD-like fields (CSV)
-          │  output: *_ccd.csv (mmCIF-like columns)
+          │  output: *_ccd.csv (mmCIF-like columns) + *_atom_names.csv
           ▼
-Downstream structure prediction / modeling
+Downstream AlphaFold3 modeling (local) / other workflows
 ```
 
 ---
 
-## Step 1 — AA_Monomeric
+## Step 1 — AA_Monomeric (screen + audit + CCD mapping)
 
-**Goal:** screen *monomeric amino-acid-like* molecules (α/β/γ; discard δ+) from ChEMBL chemreps, apply strict filters, and map to CCD when possible.
+**Goal:** screen monomeric residue-like molecules from **ChEMBL 36** chemreps, apply strict filters, and map to CCD when possible.
 
-### Run
+### Required inputs (not included)
+- `chembl_36_chemreps.txt.gz` (ChEMBL 36 chemreps)
+- `components-pub.sdf.gz` (PDB CCD SDF dump)
+
+### Run (example)
 
 ```bash
 cd AA_Monomeric
 
-python aa_from_chemreps_audit_strict.py \
-  --chemreps chembl_36_chemreps.txt.gz \
-  --ccd components-pub.sdf.gz \
-  --out AA_monomers_audited.xlsx \
-  --jobs 20 \
-  --chunk-size 50000 \
-  --verbose \
-  --acid-only \
-  --max-amide-bonds 1 \
-  --max-esters 0 \
-  --max-carboxyl 2 \
-  --max-mw 350 \
-  --max-heavy 30 \
-  --max-rings 2 \
-  --max-hetero 10 \
-  --max-oxy 6 \
-  --max-chiral 4
+python aa_from_chemreps_audit_strict.py   --chemreps chembl_36_chemreps.txt.gz   --ccd components-pub.sdf.gz   --out AA_monomers_audited.xlsx   --jobs 20   --chunk-size 50000   --verbose   --acid-only   --max-amide-bonds 1   --max-esters 0   --max-carboxyl 2   --max-mw 350   --max-heavy 30   --max-rings 2   --max-hetero 10   --max-oxy 6   --max-chiral 4
 ```
 
 ### Output
 
-The script writes `AA_monomers_audited.xlsx`. Typical sheets include:
+`AA_monomers_audited.xlsx` (auditable spreadsheet):
 
 - `Monomers_OK`: passed candidates
-- `Rejected_with_Reasons`: rejected entries + explicit rejection reasons
+- `Rejected_with_Reasons`: rejected entries + machine-readable reasons
 - `All_Annotated`: merged annotations
 - `Summary` / `Summary_by_Class`: screening statistics
 
-### Algorithm overview
+### CCD matching and ambiguity handling
 
-This script is designed to be **auditable** and **streaming-friendly**:
+CCD mapping uses a two-stage InChIKey strategy:
 
-1. **Build CCD lookup tables**
-   - Stream-read `components-pub.sdf.gz`.
-   - Extract or compute **InChIKey** for each CCD component.
-   - Build maps:
-     - `InChIKey (27 chars) → [CCD_IDs]` (exact match)
-     - optional `InChIKey[:14] → [CCD_IDs]` (connectivity-layer fallback)
+1) **Exact match** on the full 27-character InChIKey  
+2) Optional **connectivity-layer fallback** using `InChIKey[:14]` (tolerates protonation/tautomer changes while preserving connectivity)
 
-2. **Stream ChEMBL chemreps**
-   - Read the gzipped chemreps text in chunks (`--chunk-size`).
-   - Parallelize chunk processing with `--jobs`.
+**Ambiguity:** multiple CCD components may share the same connectivity layer. By default, the script records all candidates in the audit table and selects one deterministically unless configured otherwise. Useful options:
 
-3. **Strict backbone detection (α/β/γ amino-acid-like monomers)**
-   - By default uses strict SMARTS patterns for:
-     - **free amine** (not amide nitrogen)
-     - **terminal carboxyl group** (optionally acid-only)
-     - carbon-chain length consistent with α/β/γ
-
-4. **Hard filters (functional groups + complexity)**
-   - Count functional motifs (e.g., amide bonds, esters, carboxyl groups).
-   - Reject molecules exceeding thresholds for: MW, heavy atoms, rings, hetero atoms, oxygens, chiral centers.
-
-5. **Robust InChIKey generation + CCD mapping**
-   - Optional salt stripping and standardization (when RDKit MolStandardize is available).
-   - Prefer exact InChIKey match; optionally fall back to connectivity-layer match.
-
-6. **Excel export for auditability**
-   - Every molecule is annotated with class (alpha/beta/gamma), metrics, InChIKey, CCD hit status/type, and rejection reasons.
-
-**Tip:** Step 2 typically consumes only `Monomers_OK` rows where `CCD` is empty (or the CCD match column indicates no hit).
+- `--no-conn14`: disable connectivity-layer fallback (stricter; fewer hits)
+- `--keep-all-ccd`: keep all CCD candidates instead of selecting only one
 
 ---
 
-## Step 2 — Smile_to_SDF
+## Step 2 — Smile_to_SDF (RDKit conformer generation)
 
 **Goal:** generate 3D conformers (SDF) for screened monomers that **do not have a corresponding CCD entry**.
-
-### Run (defaults)
 
 ```bash
 cd Smile_to_SDF
 python excel_smiles_to_individual_sdf_3d.py
 ```
 
-### Default input contract
+Default behavior:
+- reads `smile.xlsx` in the current directory
+- writes one SDF per molecule to `sdf_out_3d/`
+- failures are recorded to `sdf_failed.xlsx`
 
-- Reads `smile.xlsx` from the current directory (first sheet by default).
-- Auto-detects columns:
-  - ID: `CHEMBL_ID` / `molecule_chembl_id` / `id`
-  - SMILES: `SMILES` / `canonical_smiles` / `standard_smiles`
-
-### Output
-
-- Writes one SDF per molecule to `sdf_out_3d/` (default).
-- Failed items are recorded into `sdf_failed.xlsx`.
-
-### Algorithm overview
-
-For each SMILES:
-
-1. Parse molecule: `Chem.MolFromSmiles`
-2. Add explicit H: `Chem.AddHs`
-3. Embed a 3D conformer with **ETKDGv3**
-   - fixed random seed (default `2025`) for reproducibility
-   - `enforceChirality=True` to respect chirality encoded in SMILES
-4. Optional geometry optimization
-   - UFF or MMFF (off by default)
-5. Write individual SDF with traceable properties (`CHEMBL_ID`, `SMILES`)
-
-> Note on “L amino acids”: RDKit will enforce **the stereochemistry present in the SMILES**. If you require strictly L-forms, ensure your SMILES encodes the desired stereocenter configuration.
+Embedding:
+- ETKDGv3 with a fixed seed (default `2025`)
+- `enforceChirality=True` to respect chirality encoded in SMILES  
+  (If your SMILES does not specify stereochemistry, RDKit may choose an arbitrary assignment.)
 
 ---
 
-## Step 3 — conformation_to_ccd
+## Step 3 — conformation_to_ccd (SDF → CCD-like CSV)
 
-**Goal:** convert an SDF conformer to **CCD-style component information** for downstream structure prediction.
-
-### Run (defaults)
+**Goal:** convert an SDF conformer into a **CCD-style component description** for downstream structure prediction.
 
 ```bash
 cd conformation_to_ccd
@@ -196,61 +202,35 @@ cd conformation_to_ccd
 python CCD_generation.py
 ```
 
-### Output
-
-For each `*.sdf` in `conformation_to_ccd/sdf/`, the script writes into `conformation_to_ccd/output/`:
-
+Outputs per molecule:
 - `<name>_atom_names.csv` — atom index → renamed atom name mapping
-- `<name>_ccd.csv` — a single-row CSV containing mmCIF-like CCD fields:
-  - `_chem_comp.*`
-  - `_chem_comp_atom.*`
-  - `_chem_comp_bond.*`
-
-### Algorithm overview (what the script does)
-
-This module follows a practical **"amino-acid-like naming + CCD field extraction"** strategy:
-
-1. **Backbone detection (N, CA, C, O, OXT)**
-   - First locate a **carboxyl-like carbon** (C) by oxygen bonding pattern.
-   - Then BFS along **C–C bonds** up to 3 steps to find a **CA candidate** connected to an N.
-     - distance 1/2/3 corresponds to α/β/γ backbones.
-   - Score candidates (favor NH2-like N, sp3 CA, shorter distance) and pick the best.
-
-2. **Side-chain naming (starting from CB)**
-   - Choose CB among carbon neighbors of CA not in the backbone.
-   - BFS outward purely by bond connectivity.
-   - Use Greek-letter hierarchy for naming levels: `CB, CG, CD, CE, CZ, ...` (extended).
-   - For hetero atoms, use `Element + level` patterns (e.g., `OG`, `OD1`, `NZ`).
-   - Resolve branches with numeric suffixes based on subtree “weight”.
-
-3. **AlphaFold3 compatibility checks**
-   - Validate names against an ATOM37-like set.
-   - Apply a conservative rule to label terminal `CH2` only when carbon has exactly 2 H and is terminal.
-   - Globally uniquify atom names to avoid duplicates.
-
-4. **CCD field export (mmCIF-like columns, written as CSV)**
-   - Derive formula, molecular weight.
-   - Export per-atom fields: charges, aromatic flags, atom IDs, and ideal Cartesian coordinates from the conformer.
-   - Export per-bond fields: atom pairs, bond order (with kekulization fallback for aromatics), aromatic flags.
-   - Order atoms “backbone-first” and bonds “backbone-bond-first” to resemble protein conventions.
+- `<name>_ccd.csv` — a single-row CSV containing mmCIF-like fields:
+  - `_chem_comp.*`, `_chem_comp_atom.*`, `_chem_comp_bond.*`
 
 ---
 
-## Practical notes
+## Using the generated CSV with local AlphaFold3
 
-- **Input data files** (Step 1) are not included:
-  - `chembl_36_chemreps.txt.gz` (ChEMBL chemreps)
-  - `components-pub.sdf.gz` (PDB CCD SDF dump)
+If you run AlphaFold3 locally and want it to load custom chemical components from CSV, you may need to patch AlphaFold3’s chemical-component loader (depending on your fork/version). This repo includes patched versions of:
 
-- **Reproducibility**: Step 2 uses a fixed ETKDG seed by default.
+- `./src/alphafold3/common/folding_input.py`
+- `./src/alphafold3/constants/chemical_components.py`
+- `./src/alphafold3/constants/residue_names.py`
 
-- **Quality caveat**: A single embedded conformer is often enough for CCD-style “ideal coordinates” in modeling pipelines, but you may want to generate multiple conformers and pick the lowest-energy one for hard cases.
+Copy these files into the corresponding locations of your local AlphaFold3 checkout **only if needed**.
+
+---
+
+## Reproducibility and limitations
+
+- **Determinism:** Step 2 uses a fixed RDKit embedding seed by default.
+- **Chirality note:** HighRes_Builder preserves stereochemistry as encoded in the input where available, but final stereochemical correctness in predicted complexes can still depend on the downstream predictor. We recommend post-hoc stereochemical validation for chirality-critical applications.
+- **Quality caveat:** a single conformer is often sufficient for “ideal coordinates” in CCD-like workflows, but hard chemotypes may benefit from multiple conformers and energy-based selection.
 
 ---
 
 ## Troubleshooting
 
-- **RDKit installation issues**: prefer conda-forge builds.
-- **Embedding failures**: try enabling `--opt uff` or increasing RDKit embedding attempts (requires script changes).
-- **Chirality ambiguities**: ensure your SMILES encodes stereochemistry; otherwise RDKit may produce arbitrary chiral assignments.
-
+- RDKit installation issues: prefer conda-forge builds
+- Embedding failures: try enabling force-field optimization (UFF/MMFF) or increasing embedding attempts (script changes)
+- Chirality ambiguities: ensure SMILES encodes stereochemistry; otherwise RDKit may assign chirality arbitrarily
