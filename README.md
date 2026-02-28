@@ -70,6 +70,12 @@ HighRes_Builder is intentionally scoped to **peptide-embeddable, amino-acid-like
 - **α/β/γ amino acids** with side-chain substitutions (halogenation, methylation, hydroxylation, thioether/selenide, etc.)
 - Common **residue-like modifications** that still form standard peptide bonds (free amine + terminal carboxyl group)
 - Molecules with **explicit stereochemistry** in SMILES when chirality matters (recommended)
+- We curated residue-like molecules from ChEMBL 36, using the chemreps bulk file chembl_36_chemreps.txt.gz (canonical SMILES). The CCD reference for mapping is the public wwPDB Chemical Component Dictionary SDF dump (components-pub.sdf.gz).
+Reproducible inclusion/exclusion checklist:
+Parsing & normalization: RDKit parsing of canonical SMILES; salt stripping; optional RDKit standardization/tautomer canonicalization prior to InChIKey generation.
+Residue-like scaffold detection: strict SMARTS identification of an amino-acid-like scaffold with a free amine (non-amide N with ≥1 H) connected via an aliphatic chain to a terminal carboxyl group; classification restricted to α/β/γ (δ+ discarded).
+Hard functional-group filters: exclude molecules with C(=O)N (amide) > 1, C(=O)O–C (ester/carbonate) > 0, or carboxyl groups > 2; ambiguous multi-class hits are excluded and logged.
+CCD mapping (InChIKey logic): map each candidate to CCD by (i) exact full InChIKey, then (ii) optional connectivity-layer fallback (first 14 characters) to tolerate protonation/tautomer differences.
 
 ### When to expect exclusions
 - **Peptides/oligomers** (multiple amide bonds) — not a single-residue definition
